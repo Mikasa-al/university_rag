@@ -2,16 +2,60 @@ import re
 import os
 from pathlib import Path
 from collections import Counter
+import json
 
 from openai import OpenAI
 import chromadb
 
 from document_reader import read_document
 
-# 1. 读取并切分支持的文档
+
+# 1. 读取并切分文档
 chunks = []
 chunk_size = 500
 
+def split_into_chunks(text, source, title="", source_url=""):
+    paragraphs = [p.strip() for p in text.splitlines() if p.strip()]
+    current_chunk = ""
+
+    for paragraph in paragraphs:
+        sentences = re.split(r"(?<=[。！？；])", paragraph)
+
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if not sentence:
+                continue
+
+            if current_chunk and len(current_chunk) + len(sentence) > chunk_size:
+                chunks.append({
+                    "source": source,
+                    "title": title,
+                    "source_url": source_url,
+                    "text": current_chunk.strip()
+                })
+                current_chunk = ""
+
+            current_chunk += sentence
+
+        if current_chunk and len(current_chunk) >= chunk_size * 0.8:
+            chunks.append({
+                "source": source,
+                "title": title,
+                "source_url": source_url,
+                "text": current_chunk.strip()
+            })
+            current_chunk = ""
+
+    if current_chunk.strip():
+        chunks.append({
+            "source": source,
+            "title": title,
+            "source_url": source_url,
+            "text": current_chunk.strip()
+        })
+
+
+# 读取 Word、PDF、Excel 等文件
 supported_formats = {".doc", ".docx", ".pdf", ".xls", ".xlsx"}
 documents_dir = Path("documents")
 
@@ -29,48 +73,39 @@ for file_path in documents_dir.iterdir():
         print(f"跳过空文件：{file_path.name}")
         continue
 
-    paragraphs = [
-        p.strip() for p in text.splitlines() if p.strip()
-    ]
-    current_chunk = ""
+    split_into_chunks(text, source=file_path.name)
 
-    for paragraph in paragraphs:
-        sentences = re.split(r"(?<=[。！？；])", paragraph)
 
-        for sentence in sentences:
-            sentence = sentence.strip()
-            if not sentence:
-                continue
+# 读取爬虫抓取的 JSON 制度
+json_path = Path("crawled_policies/policies.json")
 
-            if current_chunk and len(current_chunk) + len(sentence) > chunk_size:
-                chunks.append({
-                    "source": file_path.name,
-                    "text": current_chunk.strip()
-                })
-                current_chunk = ""
+if json_path.exists():
+    policies = json.loads(json_path.read_text(encoding="utf-8"))
 
-            current_chunk += sentence
+    for policy in policies:
+        content = policy.get("content", "").strip()
+        if not content:
+            continue
 
-        if current_chunk and len(current_chunk) >= chunk_size * 0.8:
-            chunks.append({
-                "source": file_path.name,
-                "text": current_chunk.strip()
-            })
-            current_chunk = ""
+        split_into_chunks(
+            content,
+            source=policy.get("title", "未知制度"),
+            title=policy.get("title", ""),
+            source_url=policy.get("url", "")
+        )
 
-    if current_chunk.strip():
-        chunks.append({
-            "source": file_path.name,
-            "text": current_chunk.strip()
-        })
+    print(f"已读取爬虫制度：{len(policies)} 篇")
+else:
+    print("未找到 policies.json，跳过爬虫数据。")
+
 
 if not chunks:
     raise ValueError("没有读取到文档内容！")
 
 print(f"读取与切分完成，共 {len(chunks)} 段。")
 print("各文档片段数量：")
-from collections import Counter
 print(Counter(item["source"] for item in chunks))
+
 
 
 # 2. 使用阿里云百炼 API 生成向量
@@ -121,7 +156,12 @@ collection.add(
     documents=texts,
     embeddings=embeddings,
     metadatas=[
-        {"source": item["source"], "chunk_id": i}
+        {
+            "source": item["source"],
+            "title": item.get("title", ""),
+            "source_url": item.get("source_url", ""),
+            "chunk_id": i
+        }
         for i, item in enumerate(chunks)
     ]
 )
