@@ -1,39 +1,48 @@
 import re
 import os
 from pathlib import Path
-from docx import Document
+from collections import Counter
+
 from openai import OpenAI
 import chromadb
 
-# 1. 读取并切分所有 Word 文档
+from document_reader import read_document
+
+# 1. 读取并切分支持的文档
 chunks = []
 chunk_size = 500
 
+supported_formats = {".doc", ".docx", ".pdf", ".xls", ".xlsx"}
+documents_dir = Path("documents")
 
-for file_path in Path("documents").glob("*.docx"):
-    doc = Document(file_path)
-    text = "\n".join(
-        p.text.strip()
-        for p in doc.paragraphs
-        if p.text.strip()
-    )
+for file_path in documents_dir.iterdir():
+    if file_path.suffix.lower() not in supported_formats:
+        continue
+
+    try:
+        text = read_document(file_path)
+    except Exception as e:
+        print(f"读取失败：{file_path.name}，原因：{e}")
+        continue
+
+    if not text.strip():
+        print(f"跳过空文件：{file_path.name}")
+        continue
 
     paragraphs = [
-        p.strip()
-        for p in text.split("\n")
-        if p.strip()
+        p.strip() for p in text.splitlines() if p.strip()
     ]
-
     current_chunk = ""
 
     for paragraph in paragraphs:
         sentences = re.split(r"(?<=[。！？；])", paragraph)
 
         for sentence in sentences:
-            if not sentence.strip():
+            sentence = sentence.strip()
+            if not sentence:
                 continue
 
-            if len(current_chunk) + len(sentence) > chunk_size and current_chunk:
+            if current_chunk and len(current_chunk) + len(sentence) > chunk_size:
                 chunks.append({
                     "source": file_path.name,
                     "text": current_chunk.strip()
@@ -54,28 +63,14 @@ for file_path in Path("documents").glob("*.docx"):
             "source": file_path.name,
             "text": current_chunk.strip()
         })
-        current_chunk = ""
 
 if not chunks:
     raise ValueError("没有读取到文档内容！")
 
-
-
-paragraphs = [
-    p.strip()
-    for p in text.split("\n")
-    if p.strip()
-]
-
-current_chunk = ""
-
-for paragraph in paragraphs:
-    # 单个段落过长时，再按句子切分
-    sentences = re.split(r"(?<=[。！？；])", paragraph)
-
-    for sentence in sentences:
-        if not sentence.strip():
-            continue
+print(f"读取与切分完成，共 {len(chunks)} 段。")
+print("各文档片段数量：")
+from collections import Counter
+print(Counter(item["source"] for item in chunks))
 
 
 # 2. 使用阿里云百炼 API 生成向量
