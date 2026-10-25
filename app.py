@@ -67,35 +67,52 @@ elif page == "制度智能问答":
                     st.success("已完成制度检索与回答")
 
                     st.subheader("📖 回答")
-                    st.markdown(result.get("answer", "暂时没有生成回答。"))
+                    st.markdown(
+                        result.get("answer", "暂时没有生成回答。")
+                    )
 
                     sources = result.get("sources", [])
 
                     if sources:
                         st.subheader("📚 参考制度依据")
+                        st.caption(f"共找到 {len(sources)} 条参考片段")
 
                         for i, source in enumerate(sources, start=1):
                             title = source.get("source", "未知制度文件")
+                            text = source.get("text", "暂无原文内容")
+                            distance = source.get("distance")
 
-                            with st.expander(f"依据 {i}：{title}"):
-                                st.write("相关原文：")
-                                st.write(source.get("text", "暂无原文内容"))
+                            with st.expander(
+                                f"📄 依据 {i}：{title}"
+                            ):
+                                st.markdown("**相关制度原文**")
 
-                                if source.get("distance") is not None:
+                                preview_length = 300
+
+                                if len(text) > preview_length:
+                                    st.write(
+                                        text[:preview_length] + "……"
+                                    )
+
+                                    with st.expander("查看完整原文"):
+                                        st.write(text)
+                                else:
+                                    st.write(text)
+
+                                if distance is not None:
                                     st.caption(
-                                        f"检索距离：{source['distance']:.4f}"
+                                        f"检索距离：{distance:.4f}"
                                     )
                     else:
-                        st.warning("本次回答没有返回可展示的引用来源。")
+                        st.warning(
+                            "本次回答没有返回可展示的引用来源。"
+                        )
 
                 else:
                     st.warning(
                         "暂时没有检索到足够可靠的制度依据，"
                         "建议调整问题或核对学校发布的制度原文。"
                     )
-
-                    if result.get("answer"):
-                        st.write(result["answer"])
 
             except Exception as e:
                 st.error(
@@ -133,12 +150,18 @@ elif page == "制度更新追踪":
         if old_file is None or new_file is None:
             st.warning("请先上传旧版和新版两个文件。")
         elif old_file.name == new_file.name:
-            st.warning("两个文件的名称相同，请确认分别选择了旧版和新版。")
+            st.warning(
+                "两个文件的名称相同，请确认分别选择了旧版和新版。"
+            )
         else:
             try:
                 with tempfile.TemporaryDirectory() as temp_dir:
-                    old_path = Path(temp_dir) / f"old_{Path(old_file.name).name}"
-                    new_path = Path(temp_dir) / f"new_{Path(new_file.name).name}"
+                    old_path = (
+                        Path(temp_dir) / f"old_{Path(old_file.name).name}"
+                    )
+                    new_path = (
+                        Path(temp_dir) / f"new_{Path(new_file.name).name}"
+                    )
 
                     old_path.write_bytes(old_file.getvalue())
                     new_path.write_bytes(new_file.getvalue())
