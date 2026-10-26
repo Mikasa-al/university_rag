@@ -33,26 +33,44 @@ def search_policies(question, top_k=3):
     )
     query_vector = response.data[0].embedding
 
-    # 检索相关文本
+    # 先计算需要检索的候选数量
+    candidate_k = min(max(top_k * 5, 10), collection.count())
+
+    # 再执行检索
     results = collection.query(
         query_embeddings=[query_vector],
-        n_results=min(top_k, collection.count()),
+        n_results=candidate_k,
         include=["documents", "metadatas", "distances"]
     )
+    print("知识库总片段数：", collection.count())
+    print("本次请求候选数：", candidate_k)
 
     # 整理为统一的数据结构
     items = []
+
     for i, text in enumerate(results["documents"][0]):
         metadata = results["metadatas"][0][i]
 
         items.append({
             "source": metadata.get("source", "未知来源"),
+            "title": metadata.get("title", ""),
+            "source_url": metadata.get("source_url", ""),
             "chunk_id": metadata.get("chunk_id"),
             "text": text,
             "distance": results["distances"][0][i]
         })
 
-    return items
+    # 过滤距离过大的结果
+    filtered_items = [
+        item for item in items
+        if item["distance"] <= 0.7
+    ]
+
+    # 按距离从小到大排序
+    filtered_items.sort(key=lambda item: item["distance"])
+
+    # 返回最相关的片段，不再按制度去重
+    return filtered_items[:top_k]
 
 
 if __name__ == "__main__":
@@ -77,7 +95,8 @@ if __name__ == "__main__":
                 print("来源：", item["source"])
                 print("片段编号：", item["chunk_id"])
                 print("距离：", round(item["distance"], 4))
-                print("内容：", item["text"][:200])
+                print("内容：", item["text"])
+                print("官网链接：", item["source_url"])
 
         except Exception as e:
             print(f"检索失败：{e}")

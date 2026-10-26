@@ -7,8 +7,6 @@ import json
 from openai import OpenAI
 import chromadb
 
-from document_reader import read_document
-
 
 # 1. 读取并切分文档
 chunks = []
@@ -16,65 +14,62 @@ chunk_size = 500
 
 def split_into_chunks(text, source, title="", source_url=""):
     paragraphs = [p.strip() for p in text.splitlines() if p.strip()]
+    chunks_list = []
     current_chunk = ""
+    overlap_size = 50
 
     for paragraph in paragraphs:
-        sentences = re.split(r"(?<=[。！？；])", paragraph)
+        # 如果整个段落放入后不超过 500 字，就直接保留
+        if len(current_chunk) + len(paragraph) <= chunk_size:
+            current_chunk += paragraph + "\n"
+            continue
 
-        for sentence in sentences:
-            sentence = sentence.strip()
-            if not sentence:
-                continue
-
-            if current_chunk and len(current_chunk) + len(sentence) > chunk_size:
-                chunks.append({
-                    "source": source,
-                    "title": title,
-                    "source_url": source_url,
-                    "text": current_chunk.strip()
-                })
-                current_chunk = ""
-
-            current_chunk += sentence
-
-        if current_chunk and len(current_chunk) >= chunk_size * 0.8:
-            chunks.append({
+        # 当前片段已达到一定长度，先保存
+        if current_chunk.strip():
+            chunks_list.append({
                 "source": source,
                 "title": title,
                 "source_url": source_url,
                 "text": current_chunk.strip()
             })
-            current_chunk = ""
 
+        # 保留上一片段末尾约 50 字作为重叠
+        overlap = current_chunk[-overlap_size:] if current_chunk else ""
+
+        # 当前段落本身不超过 500 字，就作为新片段的开头
+        if len(paragraph) <= chunk_size:
+            current_chunk = overlap + paragraph + "\n"
+        else:
+            # 超长段落才按句子切分
+            sentences = re.split(r"(?<=[。！？；])", paragraph)
+            current_chunk = overlap
+
+            for sentence in sentences:
+                sentence = sentence.strip()
+                if not sentence:
+                    continue
+
+                if len(current_chunk) + len(sentence) > chunk_size:
+                    chunks_list.append({
+                        "source": source,
+                        "title": title,
+                        "source_url": source_url,
+                        "text": current_chunk.strip()
+                    })
+                    current_chunk = current_chunk[-overlap_size:]
+
+                current_chunk += sentence
+
+    # 保存最后剩余的片段
     if current_chunk.strip():
-        chunks.append({
+        chunks_list.append({
             "source": source,
             "title": title,
             "source_url": source_url,
             "text": current_chunk.strip()
         })
 
-
-# 读取 Word、PDF、Excel 等文件
-supported_formats = {".doc", ".docx", ".pdf", ".xls", ".xlsx"}
-documents_dir = Path("documents")
-
-for file_path in documents_dir.iterdir():
-    if file_path.suffix.lower() not in supported_formats:
-        continue
-
-    try:
-        text = read_document(file_path)
-    except Exception as e:
-        print(f"读取失败：{file_path.name}，原因：{e}")
-        continue
-
-    if not text.strip():
-        print(f"跳过空文件：{file_path.name}")
-        continue
-
-    split_into_chunks(text, source=file_path.name)
-
+    chunks.extend(chunks_list)
 
 # 读取爬虫抓取的 JSON 制度
 json_path = Path("crawled_policies/policies.json")
@@ -91,7 +86,7 @@ if json_path.exists():
             content,
             source=policy.get("title", "未知制度"),
             title=policy.get("title", ""),
-            source_url=policy.get("url", "")
+            source_url=policy.get("source_url", "")
         )
 
     print(f"已读取爬虫制度：{len(policies)} 篇")

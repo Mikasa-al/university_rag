@@ -39,6 +39,12 @@ def get_policy_links():
         try:
             soup = get_soup(list_url)
 
+            for a in soup.select("a[href]"):
+                href = a.get("href", "")
+                text = a.get_text(" ", strip=True)
+                if ".htm" in href and ("下一页" in text or text.isdigit()):
+                    print("发现分页链接：", text, "->", urljoin(list_url, href))
+
             print("当前页面标题：", soup.title.get_text(strip=True))
             print("页面中的制度相关文字：")
             print(soup.get_text(" ", strip=True)[-1500:])
@@ -69,6 +75,13 @@ def get_policy_links():
 def get_policy_content(url, list_title):
     soup = get_soup(url)
 
+    for a in soup.select("a[href]"):
+        href = a.get("href", "")
+        if ".doc" in href.lower() or ".pdf" in href.lower():
+            attachment_url = urljoin(url, href)
+            filename = a.get_text(strip=True)
+            download_attachment(attachment_url, filename)
+
     content = None
     for selector in [
         ".v_news_content",
@@ -92,6 +105,18 @@ def get_policy_content(url, list_title):
         "crawled_at": datetime.now().isoformat(timespec="seconds"),
     }
 
+def download_attachment(url, filename):
+    """下载制度附件并保存到本地。"""
+    save_dir = OUTPUT_DIR / "attachments"
+    save_dir.mkdir(exist_ok=True)
+
+    file_path = save_dir / filename
+
+    response = session.get(url, timeout=30)
+    response.raise_for_status()
+
+    file_path.write_bytes(response.content)
+    print("附件已下载：", file_path)
 
 if __name__ == "__main__":
     links = get_policy_links()
